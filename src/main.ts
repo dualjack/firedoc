@@ -16,6 +16,13 @@ export function registerFireDoc<FIELDS extends object>(options: UseFireDocOption
     } = options;
 
     return {
+        collection(){
+            return firestore.collection(
+                typeof collectionPath === 'function'
+                ? collectionPath()
+                : collectionPath
+            );
+        },
         create(id?: string, fields?: Partial<FIELDS>): Main<FIELDS>{
             return new Main({
                 firestore,
