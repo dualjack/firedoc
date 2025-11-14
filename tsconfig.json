@@ -1,0 +1,14 @@
+{
+    "compilerOptions": {
+        "declaration": true,
+        "declarationDir": "dist",
+        "emitDeclarationOnly": false,
+        "moduleResolution": "nodenext",
+        "outDir": "dist",
+        "module": "NodeNext",
+        "target": "ES2022",
+        "strict": false,
+        "esModuleInterop": true
+    },
+    "include": ["src"]
+}

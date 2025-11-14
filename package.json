@@ -1,0 +1,23 @@
+{
+    "name": "@dualjack/firedoc",
+    "private": false,
+    "version": "0.0.1",
+    "author": "Jakub Kuranda",
+    "type": "module",
+    "files": [
+        "dist",
+        "!dist/**/*.test.*",
+        "!dist/**/*.spec.*"
+    ],
+    "main": "./dist/main.js",
+    "module": "./dist/main.js",
+    "types": "./dist/main.d.ts",
+    "scripts": {
+        "build": "tsc",
+        "npm:publish": "npm run build && npm publish --access public"
+    },
+    "devDependencies": {
+        "typescript": "~5.9.3",
+        "firebase-admin": "^13"
+    }
+}
