@@ -5,6 +5,8 @@ This is a simple, hard-typed wrapper around Google Firestore database.
 It's still in development but the overall 
 functionality is ready-to-use and battle-tested.
 
+![NPM Version](https://img.shields.io/npm/v/%40dualjack%2Ffiredoc)
+
 ## Quick start
 
 Somewhere in your project. For example globally 
