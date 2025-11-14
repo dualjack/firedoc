@@ -1,0 +1,1 @@
+export type MaybeCallable<T = any> = (() => T) | T;
