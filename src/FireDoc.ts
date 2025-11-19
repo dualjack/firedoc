@@ -1,40 +1,28 @@
-//  Helper type for extracting doc fields type from DocEntity class.
-import {MaybeCallable} from "./helpers.js";
-import {type DocumentReference, FieldValue, type Firestore, Timestamp} from "firebase-admin/firestore";
+import {type DocumentReference, Timestamp, FieldValue, type Firestore} from "firebase-admin/firestore";
+import type {Query} from "firebase-admin/firestore";
 
+//  Helper type for extracting doc fields type from DocEntity class.
 export type InferFireDocFields<Type> = Type extends FireDoc<infer X> ? X : never;
 
 //  Firebase firestore Doc wrapper.
-export class FireDoc<FIELDS extends Object> {
-
-    declare Fields: FIELDS;
+export abstract class FireDoc<FireDocFields extends Object> {
+    
+    declare Fields: FireDocFields;
 
     protected firestore: Firestore;
-    protected collectionPath: MaybeCallable<string>;
 
     private readonly docRefId: string;
-    private docFields: Partial<FIELDS>;
+    private docFields: FireDocFields;
 
     private docFieldKeysChanged : Array<string> = [];
     public readonly docRef: DocumentReference;
 
-    constructor(options: {
-        firestore: Firestore,
-        id?: string,
-        docFields?: Partial<FIELDS>,
-        collectionPath: MaybeCallable<string>
-    }){
+    public isNewDocument: boolean = false;
 
-        const {
-            firestore,
-            id,
-            docFields = {},
-            collectionPath
-        } = options;
+    protected constructor(firestore: Firestore, id: string|null = null, docFields: FireDocFields = {} as FireDocFields) {
 
         this.docFields = docFields;
         this.firestore = firestore;
-        this.collectionPath = collectionPath;
 
         if(id){
             this.docRefId = id;
@@ -42,24 +30,24 @@ export class FireDoc<FIELDS extends Object> {
         } else {
             this.docRef = firestore.collection(this.getCollectionPath()).doc();
             this.docRefId = this.docRef.id;
+            this.isNewDocument = true;
         }
 
     }
 
-    protected getCollectionPath(){
-        return typeof this.collectionPath === 'function' ? this.collectionPath() : this.collectionPath;
-    }
+    protected abstract getCollectionPath(): string;
+    
     protected getDocumentPath(){
         return this.getCollectionPath() + '/' + this.id;
-    }
+    };
 
     get id(): string {
         return this.docRefId;
     }
 
-    public getDocDataForSaveOperation(onlyChanged : boolean = false) : FIELDS {
+    public getDocDataForSaveOperation(onlyChanged : boolean = false) : FireDocFields {
 
-        const docFieldsToSave = {} as FIELDS;
+        const docFieldsToSave = {} as FireDocFields;
 
         if(onlyChanged){
 
@@ -85,32 +73,32 @@ export class FireDoc<FIELDS extends Object> {
         return this;
     }
 
-    public getAllFields(): Partial<FIELDS> {
+    public getAllFields(): FireDocFields {
         return this.docFields;
     }
 
-    public getField<K extends keyof FIELDS>(fieldName: K){
+    public getField<K extends keyof FireDocFields>(fieldName: K){
 
         let value = this.docFields[fieldName];
 
         //  Convert Timestamp object to Date.
         if(value instanceof Timestamp){
-            value = value.toDate() as FIELDS[K];
+            value = value.toDate() as FireDocFields[K];
         }
 
         return value;
     }
 
-    public setField<T extends FIELDS, K extends keyof FIELDS>(fieldName: K, value: T[K]): this {
-        this.docFields[fieldName] = (typeof value === 'undefined' ? FieldValue.delete() : value) as FIELDS[K];
+    public setField<T extends FireDocFields, K extends keyof FireDocFields>(fieldName: K, value: T[K]): this {
+        this.docFields[fieldName] = (typeof value === 'undefined' ? FieldValue.delete() : value) as FireDocFields[K];
         this.docFieldKeysChanged.push(fieldName as string);
         return this;
     }
 
-    public setFields(fields: Partial<FIELDS>): this {
+    public setFields(fields: Partial<FireDocFields>): this {
 
         Object.entries(fields).forEach(([key, value]) => {
-            this.setField(key as keyof FIELDS, value);
+            this.setField(key as keyof FireDocFields, value);
         });
 
         return this;
@@ -121,7 +109,7 @@ export class FireDoc<FIELDS extends Object> {
     public async load(): Promise<this> {
 
         const snapshot = await this.docRef.get();
-        const docData = snapshot.data() as FIELDS|undefined;
+        const docData = snapshot.data() as FireDocFields|undefined;
 
         if(docData){
             this.resetDocFieldKeysChanged();   //  Reset markers.
@@ -134,17 +122,91 @@ export class FireDoc<FIELDS extends Object> {
 
     }
 
-    public async save(option: boolean|'changes'|'overwrite' = 'changes'): Promise<typeof this> {
+    static async load<T extends object, K extends FireDoc<T>>(
+        this: new (firestore: Firestore, id: string) => K,
+        db: Firestore,
+        id: string
+    ): Promise<K> {
+        return new this(db, id).load();
+    }
 
-        //  Fallback for using boolean option.
-        const onlyChanges = typeof option === 'boolean' ? option : option === 'changes';
+    static async withQuery<T extends object, K extends FireDoc<T>>(
+        this: new (firestore: Firestore, id: string, data: InferFireDocFields<K>) => K,
+        query: Query
+    ): Promise<K[]> {
+        const snapshot = await query.get();
+        return snapshot.docs.map(doc => new this(doc.ref.firestore, doc.id, doc.data() as any));
+    }
 
-        const docData = this.getDocDataForSaveOperation(onlyChanges);
+    static async withDocRef<T extends object, K extends FireDoc<T>>(
+        this: new (firestore: Firestore, id: string, data: InferFireDocFields<K>) => K,
+        docRef: DocumentReference
+    ): Promise<K> {
+        const data = docRef.get().then(doc => doc.data());
+        return new this(docRef.firestore, docRef.id, data as any);
+    }
+
+    static async withRawFilter<T extends object, K extends FireDoc<T>>(
+        this: new (firestore: Firestore, id: string) => K,
+        firestore: Firestore,
+        input: {
+            page: number,
+            perPage: number,
+            filter: (docData: InferFireDocFields<K>,  id: string) => boolean
+        }
+    ): Promise<{allPages: number, docs: K[]}> {
+
+        const searchPerPage = 100;
+        const searchFoundItemIds: string[] = [];
+        let searchPage = 0;
+
+        //  Fake collection to get the parent collection.
+        const collection = new this(firestore, '__FAKE').docRef.parent;
+
+        while(true){
+
+            const query = collection.offset(searchPage * searchPerPage).limit(searchPerPage);
+            const docs = await query.get().then(snapshot => snapshot.docs);
+
+            //  Check if it's interesting for us.
+            const ids = docs.filter((doc) => {
+                return input.filter(doc.data() as any, doc.id);
+            }).map(doc => doc.id);
+
+            //  Nothing found. Break the loop.
+            if(ids.length === 0){
+                break;
+            }
+
+            searchFoundItemIds.push(...ids);
+            searchPage++;
+
+        }
+
+        //  Calculate num of pages.
+        const allPages = Math.ceil(searchFoundItemIds.length / input.perPage);
+
+        const idsFilteredByPagination = searchFoundItemIds.slice(
+            input.perPage * (input.page - 1),
+            input.perPage * input.page
+        );
+
+        return {
+            allPages,
+            docs: await Promise.all(idsFilteredByPagination.map((id) => {
+                return new this(firestore, id).load()
+            }))
+        };
+
+    }
+
+    public async save(onlyChanged = true): Promise<typeof this> {
+        const docData = this.getDocDataForSaveOperation(onlyChanged);
 
         this.resetDocFieldKeysChanged();   //  Reset markers.
 
         if(Object.keys(docData).length){    //  Check if docData is not empty.
-            await this.docRef.set(docData as any, {merge: onlyChanges});
+            await this.docRef.set(docData as any, {merge: true});
         }
 
         return this;
