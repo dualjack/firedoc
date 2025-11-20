@@ -218,3 +218,6 @@ export abstract class FireDoc<FireDocFields extends Object> {
     }
 
 }
+
+/** @deprecated */
+export abstract class IFireDoc<T> extends FireDoc<T> {}
