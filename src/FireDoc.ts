@@ -19,7 +19,7 @@ export abstract class FireDoc<FireDocFields extends Object> {
 
     public isNewDocument: boolean = false;
 
-    protected constructor(firestore: Firestore, id: string|null = null, docFields: FireDocFields = {} as FireDocFields) {
+    constructor(firestore: Firestore, id: string|null = null, docFields: FireDocFields = {} as FireDocFields) {
 
         this.docFields = docFields;
         this.firestore = firestore;
